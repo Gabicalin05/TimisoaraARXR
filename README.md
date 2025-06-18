@@ -1,5 +1,5 @@
 # Timisoara AR/XR Explorer
-
+Repo for IDMSC 2025
 MindAR Github: hiukim/mind-ar-js
 > Special thanks to Lucian B. for providing the 3D models used in this study via [SketchUP 3D Warehouse](https://3dwarehouse.sketchup.com/by/my) 
 
