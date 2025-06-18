@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>AR Scanner</title>
+  <script src="https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.1.4/dist/mindar-image.prod.js"></script>
+  <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.1.4/dist/mindar-image-aframe.prod.js"></script>
+</head>
+<body>
+  <div id="status" style="position: absolute; top: 10px; left: 10px; color: white; font-family: sans-serif; z-index: 999;"></div>
+
+  <a-scene mindar-image="imageTargetSrc: assets/markers/targets.mind;" 
+           color-space="sRGB" 
+           renderer="colorManagement: true, physicallyCorrectLights" 
+           vr-mode-ui="enabled: false" 
+           device-orientation-permission-ui="enabled: false">
+    <a-assets>
+      <img id="emblem" src="assets/markers/claustru.jpg" />
+    </a-assets>
+
+    <a-camera id="main-camera" position="0 0 0" look-controls="enabled: false"></a-camera>
+
+    <a-entity mindar-image-target="targetIndex: 0" id="marker">
+      <a-box id="tracked-cube" position="0 0 0" color="red" depth="0.1" height="0.1" width="0.1"></a-box>
+    </a-entity>
+  </a-scene>
+
+<script>
+  const size = 100; // mm (used only in viewer)
+
+  // DOM element references for AR marker tracking
+  const marker = document.querySelector('#marker'); 
+  const trackedCube = document.querySelector('#tracked-cube'); // 3D cube object that follows the marker
+  const statusDiv = document.getElementById('status');     // UI element to display tracking status
+
+  // State management: Flag to prevent multiple cube placements
+  let isCubePlaced = false;
+
+  // Event handler: Triggered when AR marker is detected by the camera
+  marker.addEventListener('targetFound', () => {
+    if (isCubePlaced) return;
+
+    // Delay execution to allow marker pose to stabilize before capturing position
+    setTimeout(() => {
+      // Initialize THREE.js objects for matrix decomposition
+      const position = new THREE.Vector3();    // Will hold XYZ coordinates
+      const quaternion = new THREE.Quaternion(); // Will hold rotation as quaternion
+      const scale = new THREE.Vector3();       // Will hold scale factors
+
+      // Update the cube's world matrix to ensure accurate positioning data
+      trackedCube.object3D.updateMatrixWorld(true);
+      
+      // Decompose the world transformation matrix into its component parts
+      trackedCube.object3D.matrixWorld.decompose(position, quaternion, scale);
+
+      // A-Frame uses meters as its base unit, but tracking data comes in mm
+      // Converting position from mm to m
+      position.multiplyScalar(0.001);
+
+      //Convert quaternion to Euler angles
+      const euler = new THREE.Euler();
+      euler.setFromQuaternion(quaternion, 'YXZ'); // A-Frame uses Y-up coordinate system
+
+      // Extract Y-axis rotation and convert from radians to degrees
+      const rotXZ = THREE.MathUtils.radToDeg(euler.y);
+
+      // Save cube position and rotation to local storage
+      // Position stored as full 3D vector for viewer.html to reconstruct
+      localStorage.setItem('stickyCubePos', JSON.stringify(position));
+      // Rotation stored as object with Y component for horizontal orientation
+      localStorage.setItem('stickyCubeRotXZ', JSON.stringify({y: rotXZ}));    
+      
+      statusDiv.textContent = "Marker detected. Position saved. Redirecting...";
+      isCubePlaced = true;
+
+      // Redirect to viewer page after brief delay
+      // Skip redirection during automated testing (when __karateTesting flag is set)
+      if (!window.__karateTesting) {
+        setTimeout(() => {
+          window.location.href = 'viewer.html';
+        }, 1000); // 1 second delay
+      }
+    }, 200); // 200ms delay allows AR tracking to stabilize before capturing pose
+  });
+
+  // Event handler triggered when AR marker is lost from camera view
+  marker.addEventListener('targetLost', () => {
+    statusDiv.textContent = "Marker lost";
+    // Reset state: Allow new object placement when marker is found again
+    isCubePlaced = false;
+  });
+</script>
+
+</body>
+</html>

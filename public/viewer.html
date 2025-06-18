@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>AR Viewer</title>
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+</head>
+<body>
+    <div id="status" style="position: absolute; top: 10px; left: 10px; color: white; font-family: sans-serif; z-index: 999; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px;"></div>
+    <div id="loading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-family: sans-serif; z-index: 999; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px; display: none;">
+        Loading 3D Model...
+    </div>
+    
+    <a-scene>
+      <a-camera position="0 1 0"></a-camera>
+      <a-entity id="sceneRoot"></a-entity>
+    </a-scene>
+    
+    <script>
+    // Converts from default AR marker size to actual physical size
+    const defaultTrackerWidth = 1.0; // A-Frame's default marker size
+    const actualWidth = 0.11;        // Real-world marker width (11cm)
+    const scaleFactor = actualWidth / defaultTrackerWidth; 
+
+    // Fetches 3D model file path based on building code from database
+    async function fetchGLBPath(buildingCode) {
+        try {
+            // Send POST request to server API with building code
+            const response = await fetch('/api/glb-path', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ building_code: buildingCode })
+            });
+            
+            // Parse JSON response from server
+            const data = await response.json();
+            
+            if (data.success) {
+                // Log successful database lookup
+                console.log('GLB file found:', data);
+                
+                // Log partial match details if applicable
+                if (data.matched_by === 'partial_match') {
+                    console.log('Matched by last 5 digits (${data.matched_digits}) - Full code: ${data.building_code}');
+                }
+                return data;
+            } else {
+                // Log database errors
+                console.error('Database error:', data.error);
+                return null;
+            }
+        } catch (error) {
+            // Handle network or parsing errors
+            console.error('Error fetching GLB path:', error);
+            return null;
+        }
+    }
+
+    // Creates and configures A-Frame GLTF model element
+    function createGLBModel(glbPath, position, rotation, scannedCode, matchInfo = {}) {
+        // Show loading indicator during model load
+        const loadingDiv = document.getElementById('loading');
+        loadingDiv.style.display = 'block';
+        
+        // Create A-Frame GLTF/GLB model element
+        const model = document.createElement('a-gltf-model');
+        
+        model.setAttribute('src', glbPath); // Set 3D model file source (hosted on GitHub Pages)
+        model.setAttribute('position', `${position.x} ${position.y} ${position.z}`); // World position
+        
+        // Apply rotation if provided
+        if (rotation) {
+            model.setAttribute('rotation', `0 ${rotation.y} 0`);
+        }
+        
+        // Apply physical scale factor and additional 0.1x reduction for visibility
+        const modelScale = scaleFactor * 0.1;
+        model.setAttribute('scale', `${modelScale} ${modelScale} ${modelScale}`);
+        
+        // Event handler: Model successfully loaded
+        model.addEventListener('model-loaded', () => {
+            // Hide loading indicator
+            loadingDiv.style.display = 'none';
+            
+            // Prepare match information text for display
+            let matchText = '';
+            if (matchInfo.matched_by === 'exact_match') {
+                matchText = 'Exact match';
+            } else if (matchInfo.matched_by === 'partial_match') {
+                matchText = `Matched by digits: ${matchInfo.matched_digits}`;
+            }
+            
+            // Update status display with detailed loading information
+            document.getElementById('status').innerHTML = 
+                `3D Model loaded successfully!<br>` +
+                `Scanned: ${scannedCode}<br>` +                           // Code from scanner
+                `Found: ${matchInfo.building_code || scannedCode}<br>` +  // Database match result
+                `${matchText}<br>` +                                      // Match type
+                `Position: (${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})`; // World coordinates
+                
+            logToScreen(`GLB model loaded successfully from: ${glbPath}`);
+        });
+        
+        // Event handler: Model loading failed
+        model.addEventListener('model-error', (event) => {
+            // Hide loading indicator
+            loadingDiv.style.display = 'none';
+            
+            // Log detailed error information
+            console.error('Error loading GLB model:', event.detail);
+            console.error('GLB URL:', glbPath);
+            
+            // Update status with error information
+            document.getElementById('status').innerHTML = 
+                `Error loading 3D model<br>Scanned: ${scannedCode}<br>URL: ${glbPath}<br>Falling back to colored cube`;
+            
+            // Create simple cube if 3D model fails to load
+            createFallbackCube(position, rotation, scannedCode);
+        });
+        
+        return model;
+    }
+
+    // Creates a colored cube when 3D model loading fails
+    function createFallbackCube(position, rotation, scannedCode) {
+        const edge = 2.5;
+        
+        // Create A-Frame box primitive
+        const cube = document.createElement('a-box');
+        
+        // Assign specific colors based on scanned codes
+        if (scannedCode === '06172') {
+            cube.setAttribute('color', '#00FF00'); // Green
+        } else if (scannedCode === '06095' || scannedCode === 'TM-II-s-A-06095') {
+            cube.setAttribute('color', '#FFA500'); // Orange
+        } else {
+            cube.setAttribute('color', '#4CC3D9'); // Default light blue for unknown codes
+        }
+        
+        // Scale cube dimensions by physical scale factor
+        cube.setAttribute('depth', edge * scaleFactor);
+        cube.setAttribute('height', edge * scaleFactor);
+        cube.setAttribute('width', edge * scaleFactor);
+        
+        // Position cube at specified world coordinates
+        cube.setAttribute('position', `${position.x} ${position.y} ${position.z}`);
+        
+        // Apply rotation if provided
+        if (rotation) {
+            cube.setAttribute('rotation', `0 ${rotation.y} 0`);
+        }
+        
+        // Add cube to scene
+        const sceneRoot = document.getElementById('sceneRoot');
+        sceneRoot.appendChild(cube);
+    }
+
+    // Main entry point when page loads
+    window.addEventListener('DOMContentLoaded', async () => {
+        // Retrieve stored data from previous AR tracking session
+        const pos = JSON.parse(localStorage.getItem('stickyCubePos'));        // 3D position from AR marker
+        const rotXZ = JSON.parse(localStorage.getItem('stickyCubeRotXZ'));    // Y-axis rotation from AR
+        const scannedCode = localStorage.getItem('scannedCode');              // Building code from scanner
+        
+        // Get A-Frame scene components
+        const camera = document.querySelector('a-camera');
+        const sceneRoot = document.getElementById('sceneRoot');
+        
+        // Proceed if position data and camera are available
+        if (pos && camera) {
+            // Convert stored position to THREE.js Vector3 object
+            const rawPos = new THREE.Vector3(pos.x, pos.y, pos.z);
+            
+            // Convert from AR tracking units to real-world scale
+            rawPos.x *= scaleFactor;
+            rawPos.y *= scaleFactor;
+            rawPos.z *= scaleFactor;
+            
+            // Transform from camera-relative coordinates to world coordinates
+            camera.object3D.updateMatrixWorld(true);
+            const worldPos = rawPos.applyMatrix4(camera.object3D.matrixWorld);
+            
+            // Process scanned code if available
+            if (scannedCode) {
+                document.getElementById('status').textContent = 'Loading 3D model...';
+                
+                // Attempt to fetch 3D model from database using scanned code
+                const glbData = await fetchGLBPath(scannedCode);
+                
+                // Create and display appropriate 3D content
+                if (glbData && glbData.glb_file) {
+                    const model = createGLBModel(glbData.glb_file, worldPos, rotXZ, scannedCode, glbData);
+                    sceneRoot.appendChild(model);
+                } else {
+                    // No model found in database, use colored cube
+                    document.getElementById('status').innerHTML = 
+                        `No 3D model found for code: ${scannedCode}<br>Using fallback cube`;
+                    createFallbackCube(worldPos, rotXZ, scannedCode);
+                }
+            } else {
+                // No scanned code available, create generic fallback
+                document.getElementById('status').textContent = "No scanned code found.";
+                createFallbackCube(worldPos, rotXZ, 'Unknown');
+            }
+        } else {
+            // Error: Missing position data or camera, cannot place 3D content
+            document.getElementById('status').textContent = "No position stored." + 
+                (scannedCode ? ` Scanned code: ${scannedCode}` : '');
+        }
+    });
+    </script>
+</body>
+</html>
